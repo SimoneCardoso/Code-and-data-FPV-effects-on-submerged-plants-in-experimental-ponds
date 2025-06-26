@@ -1,0 +1,524 @@
+---
+title: "Effect of PVP on submerged plants "
+author: Simone Jaqueline Cardoso
+output: html_document
+date: "2025-06-26"
+Associated publication: "add citation and DOI"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+##################################  Load data set ################################## 
+
+dir()
+
+data8 <- read.csv("Data_R8.csv", h=T) 
+summary(data8)
+str(data8)
+
+
+# Data from the last sampling data (09/11/24) was removed because water was dark and it was difficult to visualize the macrophytes in most of the ponds.
+
+
+##############################  Data cleaning and preparation ####################### 
+
+# Transforming variable Date into factor:
+data8$Date <- as.factor(data8$Date)
+
+# Arranging levels in Date:
+data8$Date <- factor(data8$Date, levels = c("8/1/22","6/15/23","7/28/23", "9/13/23", "6/20/24", "7/11/24",  "8/15/24"))
+data8$Date
+
+# Transforming other variables into factors:
+data8$Pond <- as.factor(data8$Pond)
+data8$Location <- as.factor(data8$Location)
+data8$Taxa <- as.factor(data8$Taxa)
+data8$Treatment <- as.factor(data8$Treatment) # Control vs Panel
+data8$Treatment2 <- as.factor(data8$Treatment2) # Before vs After
+data8$Treatment3 <- as.factor(data8$Treatment3) # Before, Construction, After
+
+# Subsetting data according to the sampling sites - Center and Edges of the ponds/panels:
+data_Center <- data8[data8$Location=="Center", ]
+data_Edge <- data8[data8$Location=="Edge", ] 
+
+# Converting Total_Cover_percentage to proportion (between 0 and 1)
+data8$Total_Cover_percentage2 <- data8$Total_Cover_percentage/100
+
+
+################################## Loading packages #######################################
+
+library(ggplot2)
+#install.packages("devtools")
+library (devtools)
+#devtools::install_github("JLSteenwyk/ggpubfigs")
+# load ggpubfigs - Colorblind-Friendly Color Palettes
+library(ggpubfigs)
+library(dplyr) 
+library(ggpubr)
+library(AICcmodavg)
+library(lme4)
+library(lsmeans)
+library(interactions)
+library(patchwork)
+library(emmeans)
+
+
+################################## Exploratory analysis ##################################
+
+summary(data8)
+str(data8)
+
+
+############# Macrophyte total cover (%): Center x Edges of the ponds #############
+
+set.seed(1)
+data8_2 <- data8 %>% 
+  filter_at(vars(Total_Cover_percentage), all_vars(!is.na(.))) %>%
+  select(Pond, Location, Total_Cover_percentage, Taxa) %>%
+  group_by(Pond, Location) %>%
+  summarise (Total_cover = mean(Total_Cover_percentage)) %>%
+  ungroup() 
+
+total_cover <- ggplot(data=data8_2, aes(x=Pond, y=Total_cover, fill=Location)) +
+  geom_bar(position= position_dodge(), stat="identity") +
+  theme_big_simple()+
+  #theme(legend.title = element_blank(), axis.title.y = element_text(size = 24))+
+  labs(title = " ", x = "Pond", y="Total plant cover (%)")+
+  scale_fill_manual(values = c("lightskyblue", "chocolate"), labels = c("Center", "Edges"))+
+  scale_y_continuous(limits = c(0, 110), breaks = seq(0, 100, by = 25))+
+  geom_vline(xintercept = 3.5, col='darkgray', lwd=1, lty=15)+
+  annotate("text", x=2, y=110, label= "Panel", size = 20/.pt) +
+  annotate("text", x=5, y=110, label= "Control", size = 20/.pt)+
+  theme(legend.position = "right", legend.spacing.y = unit(4, "pt"), 
+        legend.text = element_text(size = 14), 
+        legend.title = element_text(size = 16),
+        #axis.text.x = element_blank(),
+        #axis.ticks.x = element_line(),
+        plot.margin = margin(t=5, r=5, b=0, l=5))
+
+
+#### Figure 2 ####
+
+ggsave("Figure2.png", total_cover, width = 14, height = 8)
+
+getwd()
+
+
+############# Macrophyte relative cover (%) per taxa  #############
+
+## All ponds together:
+
+data8_3<- data8 %>% 
+  filter_at(vars(Percentage), all_vars(!is.na(.)))
+
+set.seed(1)
+cov_taxa_pond_general <- data8_3 %>% 
+  select(Taxa, Percentage) %>%
+  group_by(Taxa) %>%
+  summarise (Percentage_cover = mean(Percentage)) %>%
+  ungroup() 
+
+print(cov_taxa_pond_general)
+
+taxons <- c("Coontail", "Elodea","Emergent","Milfoil","Pondweed","Potamogeton","Water Marigold")
+pect<- c(4.01, 56.1, 0.85, 14.4, 4.78, 7.42, 5.62)
+
+taxa_table <- data.frame(taxons, pect)
+str(taxa_table)
+taxa_table$taxons <- as.factor(taxa_table$taxons)
+summary(taxa_table)
+
+
+## Relative cover per pond:
+
+relative_cover <- ggplot(data8_3, aes(fill=Taxa, y=Percentage, x=Pond)) + 
+  geom_bar(position="fill", stat="identity") +
+  theme_big_simple()+
+  scale_y_continuous(labels = function(x) x * 100)+
+  labs(title = " ", x = "Pond", y= "Relative plant cover (%)")+
+  geom_vline(xintercept = 3.5, col='darkgray', lwd=1, lty=15)+
+  scale_fill_manual(values = friendly_pal("wong_eight"), labels=c("Coontail", "Elodea","Emergent","Milfoil","Pondweed","Potamogeton","Water Marigold"))+
+  theme(legend.position = "right", legend.spacing.y = unit(4, "pt"), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 14),
+        plot.margin = margin(t=0, r=5, b=5, l=5),
+        axis.title.y = element_text(size = 16))
+
+
+######## Plant cover in the center of the ponds before and after the construction #########
+
+# Summarizing data by taxa: 
+
+data8_center<- data_Center %>% 
+  filter_at(vars(Percentage), all_vars(!is.na(.)))
+
+set.seed(1)
+cov_taxa_pond_center <- data8_center %>% 
+  select(Taxa, Percentage) %>%
+  group_by(Taxa) %>%
+  summarise (Percentage_cover = mean(Percentage)) %>%
+  ungroup() 
+
+print(cov_taxa_pond_center)
+
+taxons_center <- c("Coontail", "Elodea","Milfoil","Potamogeton")
+pect_center<- c(1.43, 93.2, 4.19, 0.545)
+
+taxa_table_center <- data.frame(taxons_center, pect_center)
+str(taxa_table_center)
+
+taxa_table_center$taxons_center <- as.factor(taxa_table_center$taxons_center)
+summary(taxa_table_center)
+
+
+# Subsetting data:
+
+data_center_before <- data8_center[data8_center$Treatment2=="Before", ]
+data_center_after <- data8_center[data8_center$Treatment2=="After", ]
+
+
+##### Figure 3 - center
+
+ponds_center_before <- ggplot(data_center_before, aes(fill=Taxa, y=Percentage, x=Pond)) +
+  geom_bar(position="fill", stat="identity") +
+  theme_big_simple()+
+  scale_y_continuous(labels = function(x) x * 100, breaks = seq(0, 1, by = 0.25))+
+  labs(title = "Center before", x = "", y=" Relative plant cover (%)")+
+  scale_fill_manual(values = friendly_pal("wong_eight"))+
+  geom_vline(xintercept = 3.5, col='darkgray', lwd=1, lty=15)+
+  annotate("text", x=2, y=1.1, label= "Panel", size = 20/.pt) +
+  annotate("text", x=5, y=1.1, label= "Control", size = 20/.pt)+
+  theme(legend.position = "none", 
+        axis.text.x = element_blank(), 
+        plot.margin = margin(t=5, r=5, b=0, l=5),
+        axis.title.y = element_text(size = 16),
+        plot.title = element_text(size = 16))
+ 
+ponds_center_after <- ggplot(data_center_after, aes(fill=Taxa, y=Percentage, x=Pond)) +
+  geom_bar(position="fill", stat="identity") +
+  theme_big_simple()+
+  scale_y_continuous(labels = function(x) x * 100)+
+  theme(legend.position = "none")+
+  labs(title = "Center after", x = "Pond", y=" Relative plant cover (%)")+
+  scale_fill_manual(values = friendly_pal("wong_eight"), labels=c("Coontail", "Elodea","Emergent","Milfoil","Pondweed","Potamogeton","Water Marigold"))+
+  geom_vline(xintercept = 3.5, col='darkgray', lwd=1, lty=15)+
+  theme(plot.margin = margin(t=0, r=5, b=5, l=5), axis.title.y = element_text(size = 16), plot.title = element_text(size = 16))
+  
+
+##### Figure 3 - edges
+
+# Summarizing data by taxa: 
+
+data8_edge<- data_Edge %>% 
+  filter_at(vars(Percentage), all_vars(!is.na(.)))
+
+set.seed(1)
+cov_taxa_pond_edge <- data8_edge %>% 
+  select(Taxa, Percentage) %>%
+  group_by(Taxa) %>%
+  summarise (Percentage_cover = mean(Percentage)) %>%
+  ungroup() 
+
+print(cov_taxa_pond_edge)
+
+taxons_edge <- c("Coontail", "Elodea", "Emergent", "Milfoil", "Pondweed", "Potamogeton", "Water Marigold")
+
+pect_edge<- c(6.54, 19.6, 1.68, 24.4, 9.48, 14.2, 11.1)
+
+taxa_table_edge <- data.frame(taxons_edge, pect_edge)
+str(taxa_table_edge)
+
+taxa_table_edge$taxons_edge <- as.factor(taxa_table_edge$taxons_edge)
+summary(taxa_table_edge)
+
+# Subsetting data:
+
+data_edge_before <- data8_edge[data8_edge$Treatment2=="Before", ]
+data_edge_after <- data8_edge[data8_edge$Treatment2=="After", ]
+
+ponds_edge_before <- ggplot(data_edge_before, aes(fill=Taxa, y=Percentage, x=Pond)) +
+  geom_bar(position="fill", stat="identity") +
+  theme_big_simple()+
+  scale_y_continuous(labels = function(x) x * 100, breaks = seq(0, 1, by = 0.25))+
+  labs(title = "Edges before", x = "", y="")+
+  scale_fill_manual(values = friendly_pal("wong_eight"))+
+  geom_vline(xintercept = 3.5, col='darkgray', lwd=1, lty=15)+
+  annotate("text", x=2, y=1.1, label= "Panel", size = 20/.pt) +
+  annotate("text", x=5, y=1.1, label= "Control", size = 20/.pt)+
+  theme(legend.position = "none", 
+        axis.text.x = element_blank(), 
+        plot.margin = margin(t=5, r=5, b=0, l=5),
+        axis.title.y = element_text(size = 16),
+        plot.title = element_text(size = 16))
+
+ponds_edge_after <- ggplot(data_edge_after, aes(fill=Taxa, y=Percentage, x=Pond)) +
+  geom_bar(position="fill", stat="identity") +
+  theme_big_simple()+
+  scale_y_continuous(labels = function(x) x * 100)+
+  theme(legend.position = "none")+
+  labs(title = "Edges after", x = "Pond", y="")+
+  scale_fill_manual(values = friendly_pal("wong_eight"), labels=c("Coontail", "Elodea", "Emergent", "Milfoil", "Pondweed", "Potamogeton", "Water Marigold"))+
+  geom_vline(xintercept = 3.5, col='darkgray', lwd=1, lty=15)+
+  theme(legend.position = "right", 
+        legend.spacing.y = unit(4, "pt"), 
+        legend.text = element_text(size = 14), 
+        legend.title = element_text(size = 16),
+        plot.margin = margin(t=0, r=5, b=5, l=5),
+        axis.title.y = element_text(size = 16),
+        plot.title = element_text(size = 16))
+
+#### Figure 3 ####
+
+# Make sure both plots use the same x scale
+
+fig3 <- (ponds_center_before / ponds_center_after ) |
+        (ponds_edge_before / ponds_edge_after)
+ 
+
+fig3 <- fig3 + plot_annotation(tag_levels = "A")
+
+fig3 + plot_annotation(
+  tag_levels = "A",
+  tag_prefix = "(",
+  tag_suffix = ")",
+  theme = theme(
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.tag.position = c(0, 1)  # left-aligned, top-aligned
+  )
+)
+
+
+ggsave("Figure3.png", fig3, width = 14, height = 8)
+
+getwd()
+
+
+############# Plant total cover for control and Panel along the time #############
+
+str(data8)  
+
+model1 = lmer(Total_Cover_percentage ~ Treatment*Date + (1|Pond), data = data8)
+summary(model1)
+anova(model1)
+
+hist((resid(model1) - mean(resid(model1))) / sd(resid(model1)), freq = FALSE); curve(dnorm, add = TRUE)
+plot(model1)
+
+qqnorm(resid(model1)) # Checking for the errors
+qqline(resid(model1))
+
+em_m1 <- emmeans(model1, ~ Treatment | Date)
+pairs(em_m1)
+
+em_df1 <- as.data.frame(em_m1) # this gives you a dataframe with: Date, Treatment, emmean (model-predicted mean); SE, lower.CL, upper.CL (confidence intervals)
+
+str(em_df1) 
+
+
+fig5 <- ggplot(em_df1, aes(x = Date, y = emmean, group = Treatment, color = Treatment, fill = Treatment)) +
+  geom_line() +
+  geom_point() +
+  theme_big_simple()+
+  theme(axis.line = element_line(size = 0.8), 
+        legend.text = element_text(size = 16), 
+        legend.title = element_blank())+
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.1, color = "black") +
+  geom_point(size = 3, shape = 16)+
+  geom_point(size = 3, shape = 1, color = "black")+
+  labs(y = "Total plant cover (%)", x = "Date") +
+  theme(axis.text.x =  element_text(size = 14,colour = "black"),
+        axis.text.y =  element_text(size = 14,colour = "black"),
+        axis.title.x = element_text(size = 16,colour = "black"),
+        axis.title.y = element_text(size = 16))+
+  scale_y_continuous(limits = c(0, 120), breaks = c(0, 25, 50, 75, 100))+
+  geom_vline(xintercept = 2.5, col='gray', lwd=1, lty=15)+
+  geom_vline(xintercept = 4.5, col='gray', lwd=1, lty=15)+
+  annotate("text", x = 1.5, y = max(em_df1$upper.CL) + 5, label = "Before", size = 5) +
+  annotate("text", x = 3.5, y = max(em_df1$upper.CL) + 5, label = "Construction", size = 5) +
+  annotate("text", x = 6.0, y = max(em_df1$upper.CL) + 5, label = "After", size = 5)+
+  scale_color_manual(values = c("lightskyblue", "seagreen4"))
+
+
+ggsave("Figure5.png", fig5, width = 10, height = 8)
+
+getwd()
+
+
+############# Plant height at Control and Panel treatments #############
+
+str(data8) 
+
+model2 = lmer(Plant_height ~ Treatment*Date + (1|Pond), data = data8)
+summary(model2)
+anova(model2)
+
+hist((resid(model2) - mean(resid(model2))) / sd(resid(model2)), freq = FALSE); curve(dnorm, add = TRUE)
+plot(model2)
+
+qqnorm(resid(model2)) # Checking for the errors
+qqline(resid(model2))
+
+em_m2 <- emmeans(model2, ~ Treatment | Date)
+pairs(em_m2)
+
+em_df2 <- as.data.frame(em_m2)
+str(em_df2) 
+
+
+fig6 <-  ggplot(data = em_df2, aes(x = Date, y = emmean, fill = Treatment, color = Treatment, group = Treatment))+
+  geom_line()+
+  geom_point()+
+  theme_big_simple()+
+  theme(axis.line = element_line(size = 0.8), legend.text = element_text(size = 16), legend.title = element_blank())+
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.1, color = "black") +
+  geom_point(size = 3, shape = 16)+
+  geom_point(size = 3, shape = 1, color = "black")+
+  labs(y= "Plant height (m)", x = "Date")+
+  theme(axis.text.x =  element_text(size = 14,colour = "black"),
+        axis.text.y =  element_text(size = 14,colour = "black"),
+        axis.title.x = element_text(size = 16,colour = "black"),
+        axis.title.y = element_text(size = 16))+
+  scale_y_continuous(limits = c(0,2), breaks = c(0, 0.5, 1.0, 1.5, 2))+
+  geom_vline(xintercept = 2.5, col='gray', lwd=1, lty=15)+
+  geom_vline(xintercept = 4.5, col='gray', lwd=1, lty=15)+
+  geom_hline(yintercept = 1.75, col='gray', lwd=0.5, lty=1)+
+  annotate("text", x=1.5, y=2, label = "Before", size = 5) +
+  annotate("text", x=3.5, y=2, label = "Construction", size = 5) +
+  annotate("text", x=6.0, y=2, label = "After", size = 5)+
+  annotate("text", x=0.9, y=1.80, label= "Water level", size = 10/.pt)+
+  scale_color_manual(values = c("lightskyblue", "seagreen4"))
+
+ggsave("Figure6.png", fig6, width = 10, height = 8)
+
+getwd()
+
+
+##################################  ANOSIM ################################## 
+
+##### Before, Construction and After - Change in species composition ######
+
+# Jaccard - presence and absence
+# Bray-Curtis - percentage
+
+# To test if there is a statistical difference between the microbial communities of two or more groups of samples.
+# Null Hypothesis: there is no difference between the microbial communities of your groups of samples
+
+##  Calling the data set
+dir()
+
+data_anosim <- read.csv("species_env_macrophyte.csv", h=T) 
+# Here I used the sum of the percentage cover of all sampling sites, being 400% the maximum value (i.e., 4 sites in the center = 100+100+100+100, 4 sites on the edges = 100+100+100+100)
+
+summary(data_anosim)
+str(data_anosim)
+
+## Loading packages
+
+library(vegan)
+
+## Make community matrix - extract columns with abundance information, turn data frame into matrix
+com = data_anosim[,6:ncol(data_anosim)]
+m_com = as.matrix(com)
+
+## Testing the effect of treatment, control x Panel (cxp)
+cxp = anosim(m_com, data_anosim$Treatment, distance = "bray", permutations = 9999)
+cxp # No significant difference between control and Panel
+
+## Testing the effect of the time (before, construction and after)
+time = anosim(m_com, data_anosim$Treatment3, distance = "bray", permutations = 9999)
+time # Significant difference across different campaigns
+
+
+#### Indicator Species Analysis ####
+
+#install.packages("indicspecies")
+library(indicspecies)
+
+## Call dataset
+ind = read.csv("species_env_macrophyte.csv", header= TRUE)
+
+## Treatment
+abund = ind[,6:ncol(ind)]
+treatment = ind$Treatment
+
+inv = multipatt(abund, treatment, func = "r.g", control = how(nperm=9999))
+summary(inv)
+
+
+## Time
+abund = ind[,6:ncol(ind)]
+time = ind$Treatment3
+
+inv_time = multipatt(abund, time, func = "r.g", control = how(nperm=9999))
+summary(inv_time) # Millfoil 0.294  0.0214 *
+
+
+
+### NMDS ###
+
+data_anosim <- read.csv("species_env_7.csv", h=T)
+
+# Make community matrix - extract columns with abundance information
+com = data_anosim[,6:ncol(data_anosim)]
+
+# Turn abundance data frame into a matrix
+m_com = as.matrix(com)
+
+# nmds
+set.seed(123)
+nmds = metaMDS(m_com, distance = "bray")
+nmds
+
+plot(nmds)
+
+# Extract NMDS scores (x and y coordinates)
+data.scores = as.data.frame(scores(nmds))
+
+# Extract NMDS scores (x and y coordinates) for sites from newer versions of vegan package
+data.scores = as.data.frame(scores(nmds)$sites)
+
+# Add columns to data frame 
+data.scores$Pond = data_anosim$Pond
+data.scores$Treatment = data_anosim$Treatment
+data.scores$Time = data_anosim$Treatment3
+
+head(data.scores)
+
+
+library(ggplot2)
+
+figure4 <- ggplot(data.scores, aes(x = NMDS1, y = NMDS2)) + 
+  geom_point(size = 4, aes( shape = Treatment, colour = Time)) + 
+  theme(axis.text.y = element_text(colour = "black", size = 12, face = "bold"),
+        axis.text.x = element_text(colour = "black", face = "bold", size = 12), 
+        legend.text = element_text(size = 12, face ="bold", colour ="black"), 
+        legend.position = "right", axis.title.y = element_text(face = "bold", size = 14), 
+        axis.title.x = element_text(face = "bold", size = 14, colour = "black"), 
+        legend.title = element_text(size = 14, colour = "black", face = "bold"), 
+        panel.background = element_blank(), 
+        panel.border = element_rect(colour = "black", fill = NA, size = 1.2),
+        legend.key=element_blank()) + 
+  labs(x = "NMDS1", colour = "Time", y = "NMDS2", shape = "Treatment")  
+
+
+ggplot(data.scores, aes(x = NMDS1, y = NMDS2)) + 
+  geom_point(size = 4, aes( shape = Time, colour = Treatment)) + 
+  theme(axis.text.y = element_text(colour = "black", size = 12, face = "bold"),
+        axis.text.x = element_text(colour = "black", face = "bold", size = 12), 
+        legend.text = element_text(size = 12, face ="bold", colour ="black"), 
+        legend.position = "right", axis.title.y = element_text(face = "bold", size = 14), 
+        axis.title.x = element_text(face = "bold", size = 14, colour = "black"), 
+        legend.title = element_text(size = 14, colour = "black", face = "bold"), 
+        panel.background = element_blank(), 
+        panel.border = element_rect(colour = "black", fill = NA, size = 1.2),
+        legend.key=element_blank()) + 
+  labs(x = "NMDS1", colour = "Treatment", y = "NMDS2", shape = "Time")  
+
+
+ggsave("Figure4.png", fig4, width = 10, height = 8)
+
+getwd()
+
