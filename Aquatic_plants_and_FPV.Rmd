@@ -54,7 +54,7 @@ library(ggplot2)
 #install.packages("devtools")
 library (devtools)
 #devtools::install_github("JLSteenwyk/ggpubfigs")
-# load ggpubfigs - Colorblind-Friendly Color Palettes
+#load ggpubfigs - Colorblind-Friendly Color Palettes
 library(ggpubfigs)
 library(dplyr) 
 library(ggpubr)
