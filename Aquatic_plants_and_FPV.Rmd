@@ -48,7 +48,7 @@ data_Edge <- data8[data8$Location=="Edge", ]
 data8$Total_Cover_percentage2 <- data8$Total_Cover_percentage/100
 
 
-################################## Loading packages #######################################
+################################## Loading packages #####################################
 
 library(ggplot2)
 #install.packages("devtools")
@@ -72,7 +72,7 @@ summary(data8)
 str(data8)
 
 
-############# Macrophyte total cover (%): Center x Edges of the ponds #############
+################# Macrophyte total cover (%): Center x Edges of the ponds ################
 
 set.seed(1)
 data8_2 <- data8 %>% 
