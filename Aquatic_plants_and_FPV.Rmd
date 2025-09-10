@@ -1,17 +1,11 @@
----
-title: Response of Aquatic Plants to Floating Photovoltaics in Ponds
-author: Simone Jaqueline Cardoso
-output: html_document
-date: "2025-07-30"
-Associated publication: "add citation and DOI"
----
+##################################################
+# Script: Effect of PVP on submerged plants      #
+# Author: Simone Cardoso                         #
+# Date: 09/10/2025                               #
+# Associated publication: (add citation and DOI) #
+##################################################
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-
-##################################  Load data set ################################## 
+##################################  Load data set ######################################## 
 
 dir()
 
@@ -19,42 +13,17 @@ data8 <- read.csv("Data_R8.csv", h=T)
 summary(data8)
 str(data8)
 
-
 # Data from the last sampling data (09/11/24) was removed because water was dark and it was difficult to visualize the macrophytes in most of the ponds.
 
 
-##############################  Data cleaning and preparation ####################### 
+################################### Load packages ########################################
 
-# Transforming variable Date into factor:
-data8$Date <- as.factor(data8$Date)
-
-# Arranging levels in Date:
-data8$Date <- factor(data8$Date, levels = c("8/1/22","6/15/23","7/28/23", "9/13/23", "6/20/24", "7/11/24",  "8/15/24"))
-data8$Date
-
-# Transforming other variables into factors:
-data8$Pond <- as.factor(data8$Pond)
-data8$Location <- as.factor(data8$Location)
-data8$Taxa <- as.factor(data8$Taxa)
-data8$Treatment <- as.factor(data8$Treatment) # Control vs Panel
-data8$Treatment2 <- as.factor(data8$Treatment2) # Before vs After
-data8$Treatment3 <- as.factor(data8$Treatment3) # Before, Construction, After
-
-# Subsetting data according to the sampling sites - Center and Edges of the ponds/panels:
-data_Center <- data8[data8$Location=="Center", ]
-data_Edge <- data8[data8$Location=="Edge", ] 
-
-# Converting Total_Cover_percentage to proportion (between 0 and 1)
-data8$Total_Cover_percentage2 <- data8$Total_Cover_percentage/100
-
-
-################################## Loading packages #####################################
-
+library (lubridate)
 library(ggplot2)
 #install.packages("devtools")
 library (devtools)
 #devtools::install_github("JLSteenwyk/ggpubfigs")
-#load ggpubfigs - Colorblind-Friendly Color Palettes
+# load ggpubfigs - Colorblind-Friendly Color Palettes
 library(ggpubfigs)
 library(dplyr) 
 library(ggpubr)
@@ -64,96 +33,62 @@ library(lsmeans)
 library(interactions)
 library(patchwork)
 library(emmeans)
+library(scales)
+# devtools::install_github("teunbrand/ggh4x")
+library(ggh4x)
+library(vegan)
+library(indicspecies)
+library(lmerTest)
+library(tidyr)
+library(rstatix)
 
+################################  Data cleaning and preparation ######################### 
 
-################################## Exploratory analysis ##################################
+# Transforming Date into factor:
+data8$Date <- as.factor(data8$Date)
 
+# Arranging levels in Date:
+data8$Date <- factor(data8$Date, levels = c("8/1/22","6/15/23","7/28/23", "9/13/23", "6/20/24", "7/11/24",  "8/15/24"))
+data8$Date
+
+# Convert factor to Date (specify format = m/d/y):
+data8$Date2 <- as.Date(as.character(data8$Date), format = "%m/%d/%y")
+data8$Date2
+
+# Transforming date into day of year (Julian day):
+data8$doy <- yday(data8$Date2)
+head (data8$doy) 
+
+# levels = "8/1/22","6/15/23","7/28/23", "9/13/23", "6/20/24", "7/11/24",  "8/15/24"
+# doy = "213", "166", "209","256","172","193","228" - there is a problem. It restart at 1 each January.
+
+# Transforming date into day of year - continuous days since first observation
+data8$doy2 <- as.numeric(difftime(data8$Date2, min(data8$Date2), units = "days")) + 1
+
+# doy2 = "1", "319", "362","409","690","711","746" - Sequence of days since the first date.
+
+# Transforming other variables into factors:
+data8$Pond <- as.factor(data8$Pond) # 123, 124, 125, 128, 131, 132
+data8$Location <- as.factor(data8$Location) # Center, Edge
+data8$Replicate  <- as.factor(data8$Replicate) # 1, 2, 3, 4
+data8$Taxa <- as.factor(data8$Taxa) # "Coontail", "Elodea","Emergent","Milfoil","Pondweed","Potamogeton","Water Marigold"
+data8$Treatment <- as.factor(data8$Treatment) # Control vs Panel
+data8$Treatment2 <- as.factor(data8$Treatment2) # Before vs After
+data8$Treatment3 <- as.factor(data8$Treatment3) # Before, Construction, After
+
+# Subset data according to the sampling sites - Center and Edges of the ponds/panels:
+data_Center <- data8[data8$Location=="Center", ]
+data_Edge <- data8[data8$Location=="Edge", ] 
+
+# Converting Total_Cover_percentage to proportion (between 0 and 1)
+data8$Total_Cover_percentage2 <- data8$Total_Cover_percentage/100
+
+# Checking the data set 
 summary(data8)
 str(data8)
 
 
-################# Macrophyte total cover (%): Center x Edges of the ponds ################
-
-set.seed(1)
-data8_2 <- data8 %>% 
-  filter_at(vars(Total_Cover_percentage), all_vars(!is.na(.))) %>%
-  select(Pond, Location, Total_Cover_percentage, Taxa) %>%
-  group_by(Pond, Location) %>%
-  summarise (Total_cover = mean(Total_Cover_percentage),
-             SE = sd(Total_Cover_percentage) / sqrt(n()),
-             .groups = "drop") %>%
-  ungroup()  
-
-total_cover <- ggplot(data=data8_2, aes(x=Pond, y=Total_cover, fill=Location)) +
-  geom_bar(position= position_dodge(), stat="identity") +
-  geom_errorbar(aes(ymin=Total_cover-SE, ymax=Total_cover+SE), position = position_dodge (width = 0.9), width = 0.2)+
-  theme_big_simple()+
-  #theme(legend.title = element_blank(), axis.title.y = element_text(size = 24))+
-  labs(title = " ", x = "Pond", y="Mean total plant cover (%)")+
-  scale_fill_manual(values = c("lightskyblue", "chocolate"), labels = c("Center", "Edges"))+
-  scale_y_continuous(limits = c(0, 110), breaks = seq(0, 100, by = 25))+
-  geom_vline(xintercept = 3.5, col='darkgray', lwd=1, lty=15)+
-  annotate("text", x=2, y=110, label= "FPV", size = 20/.pt) +
-  annotate("text", x=5, y=110, label= "Control", size = 20/.pt)+
-  theme(legend.position = "right", legend.spacing.y = unit(4, "pt"), 
-        legend.text = element_text(size = 14), 
-        legend.title = element_text(size = 16),
-        #axis.text.x = element_blank(),
-        #axis.ticks.x = element_line(),
-        plot.margin = margin(t=5, r=5, b=0, l=5))
-
-
-#### Figure 2 ####
-
-ggsave("Figure2.png", total_cover, width = 14, height = 8)
-
-getwd()
-
-
-############# Macrophyte relative cover (%) per taxa  #############
-
-## All ponds together:
-
-data8_3<- data8 %>% 
-  filter_at(vars(Percentage), all_vars(!is.na(.)))
-
-set.seed(1)
-cov_taxa_pond_general <- data8_3 %>% 
-  select(Taxa, Percentage) %>%
-  group_by(Taxa) %>%
-  summarise (Percentage_cover = mean(Percentage)) %>%
-  ungroup() 
-
-print(cov_taxa_pond_general)
-
-taxons <- c("Coontail", "Elodea","Emergent","Milfoil","Pondweed","Potamogeton","Water Marigold")
-pect<- c(4.01, 56.1, 0.85, 14.4, 4.78, 7.42, 5.62)
-
-taxa_table <- data.frame(taxons, pect)
-str(taxa_table)
-taxa_table$taxons <- as.factor(taxa_table$taxons)
-summary(taxa_table)
-
-
-## Relative cover per pond:
-
-relative_cover <- ggplot(data8_3, aes(fill=Taxa, y=Percentage, x=Pond)) + 
-  geom_bar(position="fill", stat="identity") +
-  theme_big_simple()+
-  scale_y_continuous(labels = function(x) x * 100)+
-  labs(title = " ", x = "Pond", y= "Relative plant cover (%)")+
-  geom_vline(xintercept = 3.5, col='darkgray', lwd=1, lty=15)+
-  scale_fill_manual(values = friendly_pal("wong_eight"), labels=c("Coontail", "Elodea","Emergent","Milfoil","Pondweed","Potamogeton","Water Marigold"))+
-  theme(legend.position = "right", legend.spacing.y = unit(4, "pt"), 
-        legend.text = element_text(size = 10), 
-        legend.title = element_text(size = 14),
-        plot.margin = margin(t=0, r=5, b=5, l=5),
-        axis.title.y = element_text(size = 16))
-
-
-######## Plant cover in the center of the ponds before and after the construction #########
-
-# Calling the dataset:
+############# Relative plant cover (%) by taxa in ponds with and without FPV - Figure 2 #############
 
 data_pond <- read.csv("Fig3_per_lake.csv", h=T)
 str(data_pond)
@@ -166,23 +101,14 @@ data_pond$Treatment <- as.factor(data_pond$Treatment) # Control vs Panel
 data_pond$Treatment2 <- as.factor(data_pond$Treatment2) # Before vs After
 data_pond$Treatment3 <- as.factor(data_pond$Treatment3) # Before, Construction, After
 
-# Loading the packages:
-
-library(dplyr)
-library(ggplot2)
-library(scales)
-# devtools::install_github("teunbrand/ggh4x")
-library(ggh4x)
-
-# Summarizing data
-
 data_pond_rel <- data_pond %>%
-  filter(!is.na(Percentage), Treatment3 %in% c("Before", "After")) %>%
+  filter(!is.na(Percentage), Treatment3 %in% c("Before","Construction" ,"After")) %>%
   group_by(Pond, Location, Treatment3) %>%
   mutate(RelativeCover = Percentage / sum(Percentage, na.rm = TRUE)) %>%
   ungroup()
 
-# Defining LocTime and Pond order
+
+# Define LocTime and Pond order
 data_pond_rel <- data_pond_rel %>%
   mutate(
     LocTime = interaction(substr(Location, 1, 1), substr(Treatment3, 1, 1), sep = "-"),
@@ -193,21 +119,18 @@ data_pond_rel <- data_pond_rel %>%
       TRUE ~ NA_character_
     ),
     Group = factor(Group, levels = c("FPV", "Control")),
-    LocTime = factor(LocTime, levels = c("C-B", "C-A", "E-B", "E-A"))
+    LocTime = factor(LocTime, levels = c("C-B", "C-C", "C-A", "E-B", "E-C", "E-A"))
   )
-
 
 data_pond_rel_fpv <- filter(data_pond_rel, Pond %in% c(123, 124, 125))
 data_pond_rel_control <- filter(data_pond_rel, Pond %in% c(128, 131, 132))
 
 ## FPV
-
-# Plot
 rel_fpv <- ggplot(data_pond_rel_fpv , aes(x = LocTime, y = RelativeCover, fill = Taxa)) +
   geom_bar(stat = "identity") +
   facet_wrap(~ Pond, ncol = 3, nrow = 1, strip.position = "top") +
   scale_y_continuous(labels = function(x) x * 100, breaks = seq(0, 1, by = 0.25))+
-  scale_x_discrete(labels = c("Before", "After", "Before", "After")) +
+  scale_x_discrete(labels = c("Before", "Construction", "After", "Before", "Construction","After")) +
   theme(legend.position = "none")+
   scale_fill_manual(values = friendly_pal("wong_eight"), labels=c("Coontail", "Elodea", "Emergent", "Milfoil", "Pondweed", "Potamogeton", "Water Marigold")) +
   labs(x = NULL, y = "Relative plant cover (%)", fill = "Taxa") +
@@ -222,9 +145,9 @@ rel_fpv <- ggplot(data_pond_rel_fpv , aes(x = LocTime, y = RelativeCover, fill =
     legend.position = "none",
     plot.title = element_text(hjust = 0.5, face = "bold", size = 18) 
   ) +
-  geom_vline(xintercept = 2.5, color = "gray", size = 0.5, lwd=1, lty=15)+
-  annotate("text", x=1.5, y=1.1, label= "Center", size = 14/.pt) +
-  annotate("text", x=3.5, y=1.1, label= "Edges", size = 14/.pt)+
+  geom_vline(xintercept = 3.5, color = "gray", size = 0.5, lwd=1, lty=15)+
+  annotate("text", x=2.5, y=1.1, label= "Center", size = 14/.pt) +
+  annotate("text", x=4.5, y=1.1, label= "Edges", size = 14/.pt)+
   labs(
     x = NULL,
     y = "Relative plant cover (%)",
@@ -234,13 +157,11 @@ rel_fpv <- ggplot(data_pond_rel_fpv , aes(x = LocTime, y = RelativeCover, fill =
 
 
 ## Control
-
-# Plot
 rel_control <- ggplot(data_pond_rel_control, aes(x = LocTime, y = RelativeCover, fill = Taxa)) +
   geom_bar(stat = "identity") +
   facet_wrap(~ Pond, ncol = 3, nrow = 2, strip.position = "top") +
   scale_y_continuous(labels = function(x) x * 100, breaks = seq(0, 1, by = 0.25))+
-  scale_x_discrete(labels = c("Before", "After", "Before", "After")) +
+  scale_x_discrete(labels = c("Before", "Const","After", "Before", "Const","After")) +
   theme(legend.position = "none")+
   scale_fill_manual(values = friendly_pal("wong_eight"), labels=c("Coontail", "Elodea", "Emergent", "Milfoil", "Pondweed", "Potamogeton", "Water Marigold")) +
   labs(x = NULL, y = "Relative plant cover (%)", fill = "Taxa") +
@@ -255,9 +176,9 @@ rel_control <- ggplot(data_pond_rel_control, aes(x = LocTime, y = RelativeCover,
     legend.position = "bottom",
     plot.title = element_text(hjust = 0.5, face = "bold", size = 18) 
   ) +
-  geom_vline(xintercept = 2.5, color = "gray", size = 0.5, lwd=1, lty=15)+
-  annotate("text", x=1.5, y=1.1, label= "Center", size = 14/.pt) +
-  annotate("text", x=3.5, y=1.1, label= "Edges", size = 14/.pt)+
+  geom_vline(xintercept = 3.5, color = "gray", size = 0.5, lwd=1, lty=15)+
+  annotate("text", x=2.5, y=1.1, label= "Center", size = 14/.pt) +
+  annotate("text", x=4.5, y=1.1, label= "Edges", size = 14/.pt)+
   labs(
     x = NULL,
     y = "Relative plant cover (%)",
@@ -265,70 +186,60 @@ rel_control <- ggplot(data_pond_rel_control, aes(x = LocTime, y = RelativeCover,
     title = "Control"
   )
 
-
-#### Figure 3 ####
-
-
-fig3 <- (rel_fpv)/
+fig2 <- (rel_fpv)/
   (rel_control)
 
 y_label <- grid::textGrob("Relative plant cover (%)", rot = 90, gp = grid::gpar(fontsize = 25))
 
-final_plot <- wrap_elements(y_label) + fig3 +
+final_plot2 <- wrap_elements(y_label) + fig2 +
   plot_layout(widths = c(0.05, 1))
 
-ggsave("Figure3.png", final_plot, width = 16, height = 12)
+ggsave("Figure2.png", final_plot2, width = 16, height = 12)
 
 getwd()
 
 
-############# Percentage cover per taxa for control and Panel along the time #############
+#############  Average changes in plant cover (%) by taxa over time - Figure 3 #############
 
+str(data8)
 
-# Subsetting data:
-
+# Subset data:
 taxa_time <- data8[ ,c(1, 2, 7, 8, 9, 10, 11) ]
 taxa_time_control <- taxa_time[taxa_time$Treatment=="Control" , ]
 taxa_time_fpv <- taxa_time[taxa_time$Treatment=="Panel" , ]
 
-# Summarizing data by taxa: 
+# Summarize data by taxa: 
 
 # Control
-
 taxa_time_control <- taxa_time_control  %>% 
   filter_at(vars(Percentage), all_vars(!is.na(.)))
+  
 
 set.seed(1)
-taxa_time_control2 <- taxa_time_control  %>% 
-  select(Date, Taxa, Percentage) %>%
-  group_by(Date,Taxa) %>%
-  summarise (Percentage_cover = mean(Percentage)) %>%
-  ungroup() 
+summ_control <- taxa_time_control  %>% 
+  filter(!is.na(Percentage)) %>%
+  group_by(Date, Taxa) %>%
+  summarise(
+    n   = dplyr::n(),
+    Percentage_cover = mean(Percentage),
+    sd   = ifelse(n > 1, sd(Percentage), NA_real_),
+    se   = ifelse(n > 1, sd / sqrt(n), NA_real_),
+    tcrit = ifelse(n > 1, qt(0.975, df = n - 1), NA_real_),
+    lower = ifelse(n > 1, pmax(0, Percentage_cover - tcrit * se), Percentage_cover),
+    upper = ifelse(n > 1, pmin(100, Percentage_cover + tcrit * se), Percentage_cover),
+    .groups = "drop"
+  )
 
-print(taxa_time_control2)
+print(summ_control)
 
-# FPV
-
-taxa_time_fpv <- taxa_time_fpv  %>% 
-  filter_at(vars(Percentage), all_vars(!is.na(.)))
-
-set.seed(1)
-taxa_time_fpv2 <- taxa_time_fpv  %>% 
-  select(Date, Taxa, Percentage) %>%
-  group_by(Date,Taxa) %>%
-  summarise (Percentage_cover = mean(Percentage)) %>%
-  ungroup() 
-
-print(taxa_time_fpv2)
-
-
-taxa_time_control <- ggplot(taxa_time_control2 , aes(x = Date, y = Percentage_cover, group = Taxa, color = Taxa)) +
+taxa_time_control <- ggplot(summ_control , aes(x = Date, y = Percentage_cover, group = Taxa, color = Taxa)) +
   geom_line() +
   geom_point() +
   theme_big_simple()+
   theme(axis.line = element_line(size = 0.8), 
       legend.text = element_text(size = 16), 
       legend.title = element_blank())+
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.07, linewidth = 0.4, color = "black") +
   geom_point(size = 3, shape = 16)+
   geom_point(size = 3, shape = 1, color = "black")+
   labs(y = "Percentage cover (%)", x = "Date", title = "Control", x = "", y="")+
@@ -341,11 +252,32 @@ taxa_time_control <- ggplot(taxa_time_control2 , aes(x = Date, y = Percentage_co
   scale_y_continuous(limits = c(0, 120), breaks = c(0, 25, 50, 75, 100))+
   geom_vline(xintercept = 2.5, col='gray', lwd=1, lty=15)+
   geom_vline(xintercept = 4.5, col='gray', lwd=1, lty=15)+
-  annotate("text", x = 1.5, y = max(em_df1$upper.CL) + 5, label = "Before", size = 5) +
-  annotate("text", x = 3.5, y = max(em_df1$upper.CL) + 5, label = "Construction", size = 5) +
-  annotate("text", x = 6.0, y = max(em_df1$upper.CL) + 5, label = "After", size = 5)
-  
+  annotate("text", x = 1.5, y = max(110) + 5, label = "Before", size = 5) +
+  annotate("text", x = 3.5, y = max(110) + 5, label = "Construction", size = 5) +
+  annotate("text", x = 6.0, y = max(110) + 5, label = "After", size = 5)
 
+
+# FPV
+taxa_time_fpv <- taxa_time_fpv  %>% 
+  filter_at(vars(Percentage), all_vars(!is.na(.)))
+
+set.seed(1)
+taxa_time_fpv2<- taxa_time_fpv   %>% 
+  filter(!is.na(Percentage)) %>%
+  group_by(Date, Taxa) %>%
+  summarise(
+    n   = dplyr::n(),
+    Percentage_cover = mean(Percentage),
+    sd   = ifelse(n > 1, sd(Percentage), NA_real_),
+    se   = ifelse(n > 1, sd / sqrt(n), NA_real_),
+    tcrit = ifelse(n > 1, qt(0.975, df = n - 1), NA_real_),
+    lower = ifelse(n > 1, pmax(0, Percentage_cover - tcrit * se), Percentage_cover),
+    upper = ifelse(n > 1, pmin(100, Percentage_cover + tcrit * se), Percentage_cover),
+    .groups = "drop"
+  )
+
+print(taxa_time_fpv2)
+  
 taxa_time_fpv <- ggplot(taxa_time_fpv2 , aes(x = Date, y = Percentage_cover, group = Taxa, color = Taxa)) +
   geom_line() +
   geom_point() +
@@ -353,6 +285,7 @@ taxa_time_fpv <- ggplot(taxa_time_fpv2 , aes(x = Date, y = Percentage_cover, gro
   theme(axis.line = element_line(size = 0.8), 
         legend.text = element_text(size = 16), 
         legend.title = element_blank())+
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.07, linewidth = 0.4, color = "black") +
   geom_point(size = 3, shape = 16)+
   geom_point(size = 3, shape = 1, color = "black")+
   labs(y = "Percentage cover (%)", x = "Date", 
@@ -366,21 +299,18 @@ taxa_time_fpv <- ggplot(taxa_time_fpv2 , aes(x = Date, y = Percentage_cover, gro
   scale_y_continuous(limits = c(0, 120), breaks = c(0, 25, 50, 75, 100))+
   geom_vline(xintercept = 2.5, col='gray', lwd=1, lty=15)+
   geom_vline(xintercept = 4.5, col='gray', lwd=1, lty=15)+
-  annotate("text", x = 1.5, y = max(em_df1$upper.CL) + 5, label = "Before", size = 5) +
-  annotate("text", x = 3.5, y = max(em_df1$upper.CL) + 5, label = "Construction", size = 5) +
-  annotate("text", x = 6.0, y = max(em_df1$upper.CL) + 5, label = "After", size = 5)
+  annotate("text", x = 1.5, y = max(110) + 5, label = "Before", size = 5) +
+  annotate("text", x = 3.5, y = max(110) + 5, label = "Construction", size = 5) +
+  annotate("text", x = 6.0, y = max(110) + 5, label = "After", size = 5)
 
-
-# Make sure both plots use the same x scale
-
-fig4 <- (taxa_time_fpv | taxa_time_control) +
+fig3 <- (taxa_time_fpv | taxa_time_control) +
   plot_layout(guides = "collect") &
   theme(legend.position = "bottom",
         axis.text.x = element_text(size = 14))
 
-fig4 <- fig4 + plot_annotation(tag_levels = "A")
+fig3 <- fig3 + plot_annotation(tag_levels = "A")
 
-fig4 + plot_annotation(
+fig3 + plot_annotation(
   tag_levels = "A",
   tag_prefix = " ",
   tag_suffix = " ",
@@ -391,115 +321,14 @@ fig4 + plot_annotation(
 )
 
 
-ggsave("Figure4.png", fig4, width = 14, height = 8, dpi = 300)
+ggsave("Figure3.png", fig3, width = 14, height = 8, dpi = 300)
 
 getwd()
 
 
-############# Plant total cover for control and Panel along the time #############
+###############################  ANOSIM  ############################### 
 
-str(data8)  
-
-model1 = lmer(Total_Cover_percentage ~ Treatment*Date + (1|Pond), data = data8)
-summary(model1)
-anova(model1)
-
-hist((resid(model1) - mean(resid(model1))) / sd(resid(model1)), freq = FALSE); curve(dnorm, add = TRUE)
-plot(model1)
-
-qqnorm(resid(model1)) # Checking for the errors
-qqline(resid(model1))
-
-em_m1 <- emmeans(model1, ~ Treatment | Date)
-pairs(em_m1)
-
-em_df1 <- as.data.frame(em_m1) # this gives you a dataframe with: Date, Treatment, emmean (model-predicted mean); SE, lower.CL, upper.CL (confidence intervals)
-
-str(em_df1) 
-
-
-fig6 <- ggplot(em_df1, aes(x = Date, y = emmean, group = Treatment, color = Treatment, fill = Treatment)) +
-  geom_line() +
-  geom_point() +
-  theme_big_simple()+
-  theme(axis.line = element_line(size = 0.8), 
-        legend.text = element_text(size = 16), 
-        legend.title = element_blank())+
-  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.1, color = "black") +
-  geom_point(size = 3, shape = 16)+
-  geom_point(size = 3, shape = 1, color = "black")+
-  labs(y = "Total plant cover (%)", x = "Date") +
-  theme(axis.text.x =  element_text(size = 14,colour = "black"),
-        axis.text.y =  element_text(size = 14,colour = "black"),
-        axis.title.x = element_text(size = 16,colour = "black"),
-        axis.title.y = element_text(size = 16))+
-  scale_y_continuous(limits = c(0, 120), breaks = c(0, 25, 50, 75, 100))+
-  geom_vline(xintercept = 2.5, col='gray', lwd=1, lty=15)+
-  geom_vline(xintercept = 4.5, col='gray', lwd=1, lty=15)+
-  annotate("text", x = 1.5, y = max(em_df1$upper.CL) + 5, label = "Before", size = 5) +
-  annotate("text", x = 3.5, y = max(em_df1$upper.CL) + 5, label = "Construction", size = 5) +
-  annotate("text", x = 6.0, y = max(em_df1$upper.CL) + 5, label = "After", size = 5)+
-  scale_color_manual(values = c("lightskyblue", "seagreen4"))
-
-
-ggsave("Figure6.png", fig6, width = 10, height = 8)
-
-getwd()
-
-
-############# Plant height at Control and Panel treatments #############
-
-str(data8) 
-
-model2 = lmer(Plant_height ~ Treatment*Date + (1|Pond), data = data8)
-summary(model2)
-anova(model2)
-
-hist((resid(model2) - mean(resid(model2))) / sd(resid(model2)), freq = FALSE); curve(dnorm, add = TRUE)
-plot(model2)
-
-qqnorm(resid(model2)) # Checking for the errors
-qqline(resid(model2))
-
-em_m2 <- emmeans(model2, ~ Treatment | Date)
-pairs(em_m2)
-
-em_df2 <- as.data.frame(em_m2)
-str(em_df2) 
-
-
-fig7 <-  ggplot(data = em_df2, aes(x = Date, y = emmean, fill = Treatment, color = Treatment, group = Treatment))+
-  geom_line()+
-  geom_point()+
-  theme_big_simple()+
-  theme(axis.line = element_line(size = 0.8), legend.text = element_text(size = 16), legend.title = element_blank())+
-  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), width = 0.1, color = "black") +
-  geom_point(size = 3, shape = 16)+
-  geom_point(size = 3, shape = 1, color = "black")+
-  labs(y= "Plant height (m)", x = "Date")+
-  theme(axis.text.x =  element_text(size = 14,colour = "black"),
-        axis.text.y =  element_text(size = 14,colour = "black"),
-        axis.title.x = element_text(size = 16,colour = "black"),
-        axis.title.y = element_text(size = 16))+
-  scale_y_continuous(limits = c(0,2), breaks = c(0, 0.5, 1.0, 1.5, 2))+
-  geom_vline(xintercept = 2.5, col='gray', lwd=1, lty=15)+
-  geom_vline(xintercept = 4.5, col='gray', lwd=1, lty=15)+
-  geom_hline(yintercept = 1.75, col='gray', lwd=0.5, lty=1)+
-  annotate("text", x=1.5, y=2, label = "Before", size = 5) +
-  annotate("text", x=3.5, y=2, label = "Construction", size = 5) +
-  annotate("text", x=6.0, y=2, label = "After", size = 5)+
-  annotate("text", x=0.9, y=1.80, label= "Water level", size = 10/.pt)+
-  scale_color_manual(values = c("lightskyblue", "seagreen4"))
-
-ggsave("Figure7.png", fig7, width = 10, height = 8)
-
-getwd()
-
-
-##################################  ANOSIM ################################## 
-
-##### Before, Construction and After - Change in species composition ######
-
+# Change in species composition
 # Jaccard - presence and absence
 # Bray-Curtis - percentage
 
@@ -507,17 +336,11 @@ getwd()
 # Null Hypothesis: there is no difference between the microbial communities of your groups of samples
 
 ##  Calling the data set
-dir()
-
 data_anosim <- read.csv("species_env_macrophyte.csv", h=T) 
 # Here I used the sum of the percentage cover of all sampling sites, being 400% the maximum value (i.e., 4 sites in the center = 100+100+100+100, 4 sites on the edges = 100+100+100+100)
 
 summary(data_anosim)
 str(data_anosim)
-
-## Loading packages
-
-library(vegan)
 
 ## Make community matrix - extract columns with abundance information, turn data frame into matrix
 com = data_anosim[,6:ncol(data_anosim)]
@@ -532,10 +355,7 @@ time = anosim(m_com, data_anosim$Treatment3, distance = "bray", permutations = 9
 time # Significant difference across different campaigns
 
 
-#### Indicator Species Analysis ####
-
-#install.packages("indicspecies")
-library(indicspecies)
+###############################   Indicator Species Analysis - Table 2  ############################### 
 
 ## Call dataset
 ind = read.csv("species_env_macrophyte.csv", header= TRUE)
@@ -543,20 +363,17 @@ ind = read.csv("species_env_macrophyte.csv", header= TRUE)
 ## Treatment
 abund = ind[,6:ncol(ind)]
 treatment = ind$Treatment
-
 inv = multipatt(abund, treatment, func = "r.g", control = how(nperm=9999))
 summary(inv)
-
 
 ## Time
 abund = ind[,6:ncol(ind)]
 time = ind$Treatment3
-
 inv_time = multipatt(abund, time, func = "r.g", control = how(nperm=9999))
 summary(inv_time) # Millfoil 0.294  0.0214 *
 
 
-
+###############################  NMDS - Figure 4 ############################### 
 ### NMDS ###
 
 data_anosim <- read.csv("species_env_7.csv", h=T)
@@ -585,12 +402,12 @@ data.scores$Pond = data_anosim$Pond
 data.scores$Treatment = data_anosim$Treatment
 data.scores$Time = data_anosim$Treatment3
 
+data.scores$Time <- factor(data.scores$Time, 
+                           levels = c("Before", "Construction", "After"))
+
 head(data.scores)
 
-
-library(ggplot2)
-
-figure5 <- ggplot(data.scores, aes(x = NMDS1, y = NMDS2)) + 
+figure4 <- ggplot(data.scores, aes(x = NMDS1, y = NMDS2)) + 
   geom_point(size = 4, aes( shape = Treatment, colour = Time)) + 
   theme(axis.text.y = element_text(colour = "black", size = 12, face = "bold"),
         axis.text.x = element_text(colour = "black", face = "bold", size = 12), 
@@ -601,21 +418,58 @@ figure5 <- ggplot(data.scores, aes(x = NMDS1, y = NMDS2)) +
         panel.background = element_blank(), 
         panel.border = element_rect(colour = "black", fill = NA, size = 1.2),
         legend.key=element_blank()) + 
-  labs(x = "NMDS1", colour = "Time", y = "NMDS2", shape = "Treatment")  
+  labs(x = "NMDS1", colour = "Time", y = "NMDS2", shape = "Treatment") +
+  scale_shape_manual(values = c("Control" = 16, "Panel" = 17),
+                     labels = c("Control", "FPV"))
+
+ggsave("Figure4.png", figure4, width = 10, height = 8)
+
+getwd()
 
 
-ggplot(data.scores, aes(x = NMDS1, y = NMDS2)) + 
-  geom_point(size = 4, aes( shape = Time, colour = Treatment)) + 
-  theme(axis.text.y = element_text(colour = "black", size = 12, face = "bold"),
-        axis.text.x = element_text(colour = "black", face = "bold", size = 12), 
-        legend.text = element_text(size = 12, face ="bold", colour ="black"), 
-        legend.position = "right", axis.title.y = element_text(face = "bold", size = 14), 
-        axis.title.x = element_text(face = "bold", size = 14, colour = "black"), 
-        legend.title = element_text(size = 14, colour = "black", face = "bold"), 
-        panel.background = element_blank(), 
-        panel.border = element_rect(colour = "black", fill = NA, size = 1.2),
-        legend.key=element_blank()) + 
-  labs(x = "NMDS1", colour = "Treatment", y = "NMDS2", shape = "Time")  
+############# Temporal variation in plant cover (%) in ponds with and without FPV - Figure 5 #############
+
+set.seed(1)
+data_tc <- data8 %>% 
+  filter_at(vars(Total_Cover_percentage), all_vars(!is.na(.))) %>%
+  select(Date, Pond, Location, Treatment, Treatment2, Treatment3, Total_Cover_percentage, doy2) %>%
+  group_by(Date, Treatment) %>%
+  summarise(n   = sum(!is.na(Total_Cover_percentage)),
+            mean = mean(Total_Cover_percentage, na.rm = TRUE),
+            sd   = sd(Total_Cover_percentage, na.rm = TRUE),
+            se   = sd / sqrt(n),
+            tcrit = ifelse(n > 1, qt(0.975, df = n - 1), NA_real_),  # 95% t critical value
+            lower = mean - tcrit * se,                           # 95% CI lower
+            upper = mean + tcrit * se,                           # 95% CI upper
+            .groups = "drop"
+  )
+
+summary(data_tc)
+
+
+fig5 <- ggplot(data_tc, aes(x = Date, y = mean, group = Treatment, color = Treatment, fill = Treatment)) +
+  geom_line() +
+  geom_point() +
+  theme_big_simple()+
+  theme(axis.line = element_line(size = 0.8), 
+        legend.text = element_text(size = 16), 
+        legend.title = element_blank())+
+  geom_errorbar(aes(x = Date, ymin = lower, ymax = upper), width = 0.10, linewidth = 0.5, color = "black")+
+  geom_point(size = 3, shape = 16)+
+  geom_point(size = 3, shape = 1, color = "black")+
+  labs(y = "Total plant cover (%)", x = "Date") +
+  theme(axis.text.x =  element_text(size = 14,colour = "black"),
+        axis.text.y =  element_text(size = 14,colour = "black"),
+        axis.title.x = element_text(size = 16,colour = "black"),
+        axis.title.y = element_text(size = 16))+
+  scale_y_continuous(limits = c(0, 120), breaks = c(0, 25, 50, 75, 100))+
+  geom_vline(xintercept = 2.5, col='gray', lwd=1, lty=15)+
+  geom_vline(xintercept = 4.5, col='gray', lwd=1, lty=15)+
+  annotate("text", x = 1.5, y = max(110) + 5, label = "Before", size = 5) +
+  annotate("text", x = 3.5, y = max(110) + 5, label = "Construction", size = 5) +
+  annotate("text", x = 6.0, y = max(110) + 5, label = "After", size = 5)+
+  scale_color_manual(values = c("lightskyblue", "seagreen4"), labels = c("Control", "FPV"))+
+  scale_fill_manual(values = c("lightskyblue", "seagreen4"), labels = c("Control", "FPV"))
 
 
 ggsave("Figure5.png", fig5, width = 10, height = 8)
@@ -623,126 +477,389 @@ ggsave("Figure5.png", fig5, width = 10, height = 8)
 getwd()
 
 
-############## Limnological conditons comparasions ##############
+# BACI model:
 
-library(dplyr)
-library(tidyr)
-library(rstatix)
+str(data8)
+
+set.seed(1)
+data_mean_tc <- data8 %>% 
+  filter_at(vars(Total_Cover_percentage), all_vars(!is.na(.))) %>%
+  group_by(Date, Pond, Location, Treatment, Treatment2, Treatment3, Total_Cover_percentage, doy2) %>%
+  summarise(mean_Total_Cover_percentage = mean(Total_Cover_percentage, na.rm = TRUE))
+
+summary(data_mean_tc)
+
+model1 = lmer(mean_Total_Cover_percentage ~ Treatment*Treatment2 + doy2 + (1|Pond), data = data_mean_tc)
+summary(model1)
+anova(model1)
+
+model1_2 = lmer(mean_Total_Cover_percentage ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_mean_tc)
+summary(model1_2)
+anova(model1_2)
+
+hist((resid(model1) - mean(resid(model1))) / sd(resid(model1)), freq = FALSE); curve(dnorm, add = TRUE)
+plot(model1)
+
+qqnorm(resid(model1)) # Checking for the errors
+qqline(resid(model1))
+
+em_m1 <- emmeans(model1, ~ Treatment | Treatment2)
+pairs(em_m1)
+
+em_m2 <- emmeans(model1, ~ Treatment2 | Treatment)
+pairs(em_m2)
+
+em_m3 <- emmeans(model1, ~ Treatment*Treatment2)
+pairs(em_m3)
+
+em_m3_2 <- emmeans(model1_2, ~ Treatment*Treatment3)
+pairs(em_m3_2)
+
+
+# pairwise comparisons across the grid
+pairs_m3  <- pairs(em_m3, adjust = "tukey")   # choose adjust: "tukey","sidak","bonferroni","none",...
+
+pairs_df3 <- pairs_m3 |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+pairs_m3_2  <- pairs(em_m3_2, adjust = "tukey")   # choose adjust: "tukey","sidak","bonferroni","none",...
+
+pairs_df3_2 <- pairs_m3_2 |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+############# Temporal variation in plant height (m) in the center of ponds with and without FPV - Figure 6 #############
+
+set.seed(1)
+data_ht <- data8 %>% 
+  filter_at(vars(Plant_height), all_vars(!is.na(.))) %>%
+  select(Date, Pond, Location, Treatment, Treatment2, Treatment3, Plant_height, doy2) %>%
+  group_by(Date, Treatment) %>%
+  summarise(n   = sum(!is.na(Plant_height)),
+            mean = mean(Plant_height, na.rm = TRUE),
+            sd   = sd(Plant_height, na.rm = TRUE),
+            se   = sd / sqrt(n),
+            tcrit = ifelse(n > 1, qt(0.975, df = n - 1), NA_real_),  # 95% t critical value
+            lower = mean - tcrit * se,                           # 95% CI lower
+            upper = mean + tcrit * se,                           # 95% CI upper
+            .groups = "drop"
+  )
+
+summary(data_ht)
+
+
+fig6 <-  ggplot(data = data_ht, aes(x = Date, y = mean, fill = Treatment, color = Treatment, group = Treatment))+
+  geom_line()+
+  geom_point()+
+  theme_big_simple()+
+  theme(axis.line = element_line(size = 0.8), 
+        legend.text = element_text(size = 16), 
+        legend.title = element_blank())+
+  geom_errorbar(aes(x = Date, ymin = lower, ymax = upper), width = 0.10, linewidth = 0.5, color = "black") +
+  geom_point(size = 3, shape = 16)+
+  geom_point(size = 3, shape = 1, color = "black")+
+  labs(y= "Plant height (m)", x = "Date")+
+  theme(axis.text.x =  element_text(size = 14,colour = "black"),
+        axis.text.y =  element_text(size = 14,colour = "black"),
+        axis.title.x = element_text(size = 16,colour = "black"),
+        axis.title.y = element_text(size = 16))+
+  scale_y_continuous(limits = c(0,2), breaks = c(0, 0.5, 1.0, 1.5, 2))+
+  geom_vline(xintercept = 2.5, col='gray', lwd=1, lty=15)+
+  geom_vline(xintercept = 4.5, col='gray', lwd=1, lty=15)+
+  geom_hline(yintercept = 1.75, col='gray', lwd=0.5, lty=1)+
+  annotate("text", x=1.5, y=2, label = "Before", size = 5) +
+  annotate("text", x=3.5, y=2, label = "Construction", size = 5) +
+  annotate("text", x=6.0, y=2, label = "After", size = 5)+
+  annotate("text", x=0.9, y=1.80, label= "Water level", size = 10/.pt)+
+  scale_color_manual(values = c("lightskyblue", "seagreen4"), labels = c("Control", "FPV"))+
+  scale_fill_manual(values = c("lightskyblue", "seagreen4"), labels = c("Control", "FPV"))
+
+ggsave("Figure6.png", fig6, width = 10, height = 8)
+
+getwd()
+
+
+# BACI model:
+
+str(data8)
+
+set.seed(1)
+data_mean_ph <- data8 %>% 
+  filter_at(vars(Plant_height), all_vars(!is.na(.))) %>%
+  group_by(Date, Pond, Location, Treatment, Treatment2, Treatment3, Plant_height, doy2) %>%
+  summarise(mean_Plant_height = mean(Plant_height, na.rm = TRUE))
+
+summary(data_mean_ph)
+
+model2 = lmer(mean_Plant_height ~ Treatment*Treatment2 + doy2 + (1|Pond), data = data_mean_ph)
+summary(model2)
+anova(model2)
+
+model2_2 = lmer(mean_Plant_height ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_mean_ph)
+summary(model2_2)
+anova(model2_2)
+
+hist((resid(model2) - mean(resid(model2))) / sd(resid(model2)), freq = FALSE); curve(dnorm, add = TRUE)
+plot(model2)
+
+qqnorm(resid(model2)) 
+qqline(resid(model2))
+
+em_m4 <- emmeans(model2, ~ Treatment | Treatment2)
+pairs(em_m4)
+
+em_m5 <- emmeans(model2, ~ Treatment2 | Treatment)
+pairs(em_m5)
+
+em_m6 <- emmeans(model2, ~ Treatment*Treatment2)
+pairs(em_m6)
+
+em_m6_2 <- emmeans(model2_2, ~ Treatment*Treatment3)
+pairs(em_m6_2)
+
+
+# pairwise comparisons across the grid
+pairs_m6  <- pairs(em_m6, adjust = "tukey")   # choose adjust: "tukey","sidak","bonferroni","none",...
+
+pairs_df6 <- pairs_m6 |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+pairs_m6_2  <- pairs(em_m6_2, adjust = "tukey")   # choose adjust: "tukey","sidak","bonferroni","none",...
+
+pairs_df6_2 <- pairs_m6_2 |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+############# Limnological properties of water in ponds with and without FPV - Table 1 #############
 
 dir()
-
-data_limno <- read.csv("phys_chem_ponds.csv", h=T) 
-
-str(data_limno)
-
-data_limno$Treatment2 <- as.factor(data_limno$Treatment2)
-data_limno$Treatment <- as.factor(data_limno$Treatment)
-
+data_limno <- read.csv("phys_chem_ponds2.csv", h=T) 
 summary(data_limno)
 
+### Data cleaning and preparation 
+
+# Transforming Date into factor:
+data_limno$Date <- as.factor(data_limno$Date)
+
+# Arranging levels in Date:
+data_limno$Date <- factor(data_limno$Date, levels = c("5/23/23", "6/7/23", "6/8/23", "6/21/23", "6/29/23", "7/3/23", "7/6/23", "7/12/23", "7/27/23", "8/11/23", "8/23/23", "9/13/23", "10/3/23", "10/10/23", "10/25/23", "6/20/24", "7/3/24", "7/11/24", "8/15/24", "9/5/24", "9/11/24"))
+
+data_limno$Date
+
+# Convert factor to Date (specify format = m/d/y):
+data_limno$Date2 <- as.Date(as.character(data_limno$Date), format = "%m/%d/%y")
+data_limno$Date2
+
+# Transforming date into day of year (Julian day):
+data_limno$doy <- yday(data_limno$Date2)
+head (data_limno$doy) 
+
+# Transforming date into day of year - continuous days since first observation
+data_limno$doy2 <- as.numeric(difftime(data_limno$Date2, min(data_limno$Date2), units = "days")) + 1
+
+# doy2 = "1", "16", "17","30","38","42","45","51","66","81","93","114","134","141","156","395","408","416","451","472","478"  - Sequence of days since the first date.
+
+# Transforming other variables into factors:
+data_limno$Pond <- as.factor(data_limno$Pond) # 123, 124, 125, 128, 131, 132
+data_limno$Treatment <- as.factor(data_limno$Treatment) # Control vs Panel
+data_limno$Treatment2 <- as.factor(data_limno$Treatment2) # Before vs After
+data_limno$Treatment3 <- as.factor(data_limno$Treatment3) # Before, Construction, After
+
+# Checking the data set 
+summary(data_limno)
+str(data_limno)
+
+
+# Chlorophyll a
+
+model3 = lmer(chlorophyll ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model3)
+anova(model3)
+
+em_m_chlor <- emmeans(model3, ~ Treatment*Treatment3)
+pairs(em_m_chlor)
+
+# pairwise comparisons across the grid
+pairs_chlor  <- pairs(em_m_chlor, adjust = "none")   
+
+pairs_chlor <- pairs_chlor |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+# Pheopigments
+
+model4 = lmer(pheo ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model4)
+anova(model4)
+
+em_m_pheo <- emmeans(model4, ~ Treatment*Treatment3)
+pairs(em_m_pheo)
+
+# pairwise comparisons across the grid
+pairs_pheo  <- pairs(em_m_pheo, adjust = "none")   
+
+pairs_pheo <- pairs_pheo |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+# TP
+
+model5 = lmer(TP ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model5)
+anova(model5)
+
+em_m_TP <- emmeans(model5, ~ Treatment*Treatment3)
+pairs(em_m_TP)
+
+# pairwise comparisons across the grid
+pairs_TP  <- pairs(em_m_TP, adjust = "none")   
+
+pairs_TP <- pairs_TP |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+# TN
+
+model6 = lmer(TN ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model6)
+anova(model6)
+
+em_m_TN <- emmeans(model6, ~ Treatment*Treatment3)
+pairs(em_m_TN)
+
+# pairwise comparisons across the grid
+pairs_TN  <- pairs(em_m_TN, adjust = "none")   
+
+pairs_TN <- pairs_TN |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+# SRP
+
+model7 = lmer(SRP ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model7)
+anova(model7)
+
+em_m_chlor <- emmeans(model7, ~ Treatment*Treatment3)
+pairs(em_m_SRP)
+
+# pairwise comparisons across the grid
+pairs_SRP  <- pairs(em_m_SRP, adjust = "none")   
+
+pairs_SRP <- pairs_SRP |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+# Depth
+
+model8 = lmer(Depth ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model8)
+anova(model8)
+
+em_m_Depth <- emmeans(model8, ~ Treatment*Treatment3)
+pairs(em_m_Depth)
+
+# pairwise comparisons across the grid
+pairs_Depth  <- pairs(em_m_Depth, adjust = "none")   
+
+pairs_Depth <- pairs_Depth |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+# Temperature
+
+model9 = lmer(Temperature ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model9)
+anova(model9)
+
+em_m_Temperature <- emmeans(model9, ~ Treatment*Treatment3)
+pairs(em_m_Temperature)
+
+# pairwise comparisons across the grid
+pairs_Temperature  <- pairs(em_m_Temperature, adjust = "none")   
+
+pairs_Temperature <- pairs_Temperature |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+# pH
+
+model10 = lmer(pH ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model10)
+anova(model10)
+
+em_m_pH <- emmeans(model10, ~ Treatment*Treatment3)
+pairs(em_m_pH)
+
+# pairwise comparisons across the grid
+pairs_pH  <- pairs(em_m_pH, adjust = "none")   
+
+pairs_pH <- pairs_pH |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
+
+
+# Conductivity
 
 set.seed(1)
-results_temperature <- data_limno %>% 
-  filter(!is.na(Temperature)) %>%
-  select(Temperature , Treatment, Treatment2) %>%
-  group_by(Treatment2) %>%
-  t_test(Temperature  ~ Treatment) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
+data_cond <- data_limno %>% 
+  filter_at(vars(Cond), all_vars(!is.na(.)))
 
-print(results_temperature)
+model11 = lmer(Cond ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_cond)
+summary(model11)
+anova(model11)
 
-set.seed(1)
-results_chlorophyll <- data_limno %>% 
-  filter(!is.na(chlorophyll)) %>%
-  select(chlorophyll , Treatment, Treatment2) %>%
-  group_by(Treatment2) %>%
-  t_test(chlorophyll  ~ Treatment) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
+em_m_Cond <- emmeans(model11, ~ Treatment*Treatment3)
+pairs(em_m_Cond)
 
-print(results_chlorophyll)
+# pairwise comparisons across the grid
+pairs_Cond  <- pairs(em_m_Cond, adjust = "none")   
 
-  
-set.seed(1)
-results_TP <- data_limno %>% 
-  filter(!is.na(TP)) %>%
-  select(TP , Treatment, Treatment2) %>%
-  group_by(Treatment2) %>%
-  t_test(TP  ~ Treatment) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
-
-print(results_TP)
+pairs_Cond <- pairs_Cond |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
 
 
-set.seed(1)
-results_TN <- data_limno %>% 
-  filter(!is.na(TN)) %>%
-  select(TN , Treatment, Treatment2) %>%
-  group_by(Treatment2) %>%
-  t_test(TN  ~ Treatment) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
+# DO saturation
 
-print(results_TN)
+model12 = lmer(DO_sat ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model12)
+anova(model12)
 
+em_m_DO_sat <- emmeans(model12, ~ Treatment*Treatment3)
+pairs(em_m_DO_sat)
 
-set.seed(1)
-results_SRP <- data_limno %>% 
-  filter(!is.na(SRP)) %>%
-  select(SRP , Treatment, Treatment2) %>%
-  group_by(Treatment2) %>%
-  t_test(SRP  ~ Treatment) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
+# pairwise comparisons across the grid
+pairs_DO_sat  <- pairs(em_m_DO_sat, adjust = "none")   
 
-print(results_SRP)
+pairs_DO_sat <- pairs_DO_sat |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
 
 
-set.seed(1)
-results_pH <- data_limno %>% 
-  filter(!is.na(pH)) %>%
-  select(pH , Treatment, Treatment2) %>%
-  group_by(Treatment2) %>%
-  t_test(pH  ~ Treatment) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
+# DO
 
-print(results_pH)
+model13 = lmer(DO ~ Treatment*Treatment3 + doy2 + (1|Pond), data = data_limno)
+summary(model13)
+anova(model13)
 
+em_m_DO <- emmeans(model13, ~ Treatment*Treatment3)
+pairs(em_m_DO)
 
-set.seed(1)
-results_Cond <- data_limno %>% 
-  filter(!is.na(Cond)) %>%
-  select(Cond , Treatment, Treatment2) %>%
-  group_by(Treatment2) %>%
-  t_test(Cond  ~ Treatment) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
+# pairwise comparisons across the grid
+pairs_DO  <- pairs(em_m_DO, adjust = "none")   
 
-print(results_Cond)
-
-
-set.seed(1)
-results_DO_sat <- data_limno %>% 
-  filter(!is.na(DO_sat)) %>%
-  select(DO_sat , Treatment, Treatment2) %>%
-  group_by(Treatment2) %>%
-  t_test(DO_sat  ~ Treatment) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
-
-print(results_DO_sat)
-
-
-set.seed(1)
-results_DO <- data_limno %>% 
-  filter(!is.na(DO)) %>%
-  select(DO , Treatment, Treatment2) %>%
-  group_by(Treatment2) %>%
-  t_test(DO  ~ Treatment) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
-
-print(results_DO)
+pairs_DO <- pairs_DO |>
+  summary(infer = c(TRUE, TRUE)) |>
+  as.data.frame()
